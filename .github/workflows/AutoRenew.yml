@@ -10,29 +10,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
+    # 1. 下载当前仓库代码 (如果是私有仓库，确保 Secrets 权限正确)
+    - name: Checkout repository code
       uses: actions/checkout@v4
       with:
-        repository: gunqio/zhiyong
-        token: ${{ secrets.PAT }}          # 改用 PAT
+        token: ${{ secrets.GH_PAT }}
 
+    # 2. 安装 Python 环境
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
+    # 3. 安装依赖库
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install requests
 
+    # 4. 运行续期脚本 (配置了代理和文件名)
     - name: Run renew script
       env:
         MY_EMAIL: ${{ secrets.MY_EMAIL }}
         MY_PASSWORD: ${{ secrets.MY_PASSWORD }}
         ANON_KEY: ${{ secrets.ANON_KEY }}
-      run: python freemhost.py | tee freemhost.log
+        # 设置代理环境变量，确保 Python 脚本通过 Xray 出站
+        https_proxy: http://127.0.0.1:1080
+        http_proxy: http://127.0.0.1:1080
+      run: python freemchost.py | tee renew.log
 
+    # 5. 发送 TG 通知
     - name: Send Telegram Notification
       if: always()
       env:
@@ -40,14 +47,15 @@ jobs:
         TG_ID: ${{ secrets.TG_USER_ID }}
       run: |
         if [ "${{ job.status }}" = "success" ]; then
-          TITLE="✅ Freemhost 自动续期成功！"
+          TITLE="✅ Freemchost 自动续期成功！"
         else
-          TITLE="❌ Freemhost 自动续期失败！"
+          TITLE="❌ Freemchost 自动续期失败！"
         fi
         
-        INFO_SUMMARY=$(grep -E "服务器名称|当前状态|到期时间" freemhost.log | sed 's/"//g')
+        INFO_SUMMARY=$(grep -E "服务器名称|当前状态|到期时间" renew.log | sed 's/"//g')
+        
         if [ -z "$INFO_SUMMARY" ]; then
-          INFO_SUMMARY=$(tail -n 5 freemhost.log | sed 's/"//g')
+          INFO_SUMMARY=$(tail -n 5 renew.log | sed 's/"//g')
         fi
         
         MSG_TEXT="${TITLE}
