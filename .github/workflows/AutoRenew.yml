@@ -10,36 +10,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. 下载当前仓库代码 (如果是私有仓库，确保 Secrets 权限正确)
+    # 1. 下载代码
     - name: Checkout repository code
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GH_PAT }}
 
-    # 2. 安装 Python 环境
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.10'
-
-    # 3. 安装依赖库
-    - name: Install dependencies
+    # 2. 环境准备：Python 与 Xray
+    - name: Set up Environment
       run: |
+        # 安装 Python
         python -m pip install --upgrade pip
         pip install requests
+        
+        # 下载并解压 Xray 核心
+        curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
+        unzip xray.zip xray
+        
+        # 写入 Xray 配置文件并后台启动
+        echo '${{ secrets.VMESS_JSON }}' > config.json
+        ./xray -c config.json &
+        
+        # 等待 Xray 启动完成
+        sleep 5
 
-    # 4. 运行续期脚本 (配置了代理和文件名)
+    # 3. 运行续期脚本
     - name: Run renew script
       env:
         MY_EMAIL: ${{ secrets.MY_EMAIL }}
         MY_PASSWORD: ${{ secrets.MY_PASSWORD }}
         ANON_KEY: ${{ secrets.ANON_KEY }}
-        # 设置代理环境变量，确保 Python 脚本通过 Xray 出站
-        https_proxy: http://127.0.0.1:1080
-        http_proxy: http://127.0.0.1:1080
+        # 设置 SOCKS5 代理
+        https_proxy: socks5://127.0.0.1:1080
+        http_proxy: socks5://127.0.0.1:1080
       run: python freemchost.py | tee renew.log
 
-    # 5. 发送 TG 通知
+    # 4. 发送 Telegram 通知
     - name: Send Telegram Notification
       if: always()
       env:
