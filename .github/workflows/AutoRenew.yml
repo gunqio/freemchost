@@ -10,61 +10,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. 拉取代码 (如果是当前仓库，repository参数可删除)
-    - name: Checkout repository
+    - name: 检出基础代码
       uses: actions/checkout@v4
+
+    - name: 设置 Python
+      uses: actions/setup-python@v5
       with:
-        # 如果是拉取当前仓库，可以删掉下面这行；如果是拉取另一个私库，请保持并确保仓库名正确
-        repository: gunqio/zhiyong
-        token: ${{ secrets.GH_PAT }}
+        python-version: '3.12'
 
-    # 2. 环境准备：下载 Xray 并启动
-    - name: Setup Environment
+    # 1. 下载私库脚本 (使用你看到的这种高效写法)
+    - name: 下载私有脚本
+      env:
+        GH_TOKEN: ${{ secrets.GH_PAT }}
       run: |
-        python -m pip install --upgrade pip
-        pip install requests
-        curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
-        unzip xray.zip xray
-        echo '${{ secrets.VMESS_JSON }}' > config.json
-        ./xray -c config.json &
-        sleep 5
+        mkdir -p scripts
+        curl -L -H "Authorization: token $GH_TOKEN" \
+          "https://raw.githubusercontent.com/gunqio/zhiyong/main/freemchost.py" \
+          -o "scripts/freemchost.py"
 
-    # 3. 运行脚本 (通过 pwd 和 ls 确保执行路径无误)
-    - name: Run freemchost.py
+    # 2. 启动 Xray 代理并测试
+    - name: 启动 Xray 代理
+      env:
+        V2RAY_CONFIG: ${{ secrets.VMESS_JSON }}
+      run: |
+        curl -sL https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
+        unzip -q xray.zip xray
+        echo "$V2RAY_CONFIG" > config.json
+        ./xray run -c config.json &
+        sleep 5
+        # 代理测试
+        echo "当前代理 IP 为:"
+        curl -s --socks5 127.0.0.1:10808 ifconfig.me || echo "代理连接失败，请检查配置"
+
+    # 3. 运行脚本 (安装依赖并执行)
+    - name: 运行续期脚本
       env:
         MY_EMAIL: ${{ secrets.MY_EMAIL }}
         MY_PASSWORD: ${{ secrets.MY_PASSWORD }}
         ANON_KEY: ${{ secrets.ANON_KEY }}
         SCKEY: ${{ secrets.SCKEY }}
-        https_proxy: socks5://127.0.0.1:1080
-        http_proxy: socks5://127.0.0.1:1080
+        # 强制 Python 使用 socks5 代理
+        https_proxy: socks5://127.0.0.1:10808
+        http_proxy: socks5://127.0.0.1:10808
       run: |
-        echo "当前所在目录:"
-        pwd
-        echo "当前目录文件列表:"
-        ls -F
-        # 确保在仓库根目录执行，如果文件在子目录下，请修改此路径，如 python subfolder/freemchost.py
-        python3 freemchost.py | tee renew.log
-
-    # 4. Telegram 通知 (失败时自动提醒)
-    - name: Send Telegram Notification
-      if: always()
-      env:
-        TG_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        TG_ID: ${{ secrets.TG_USER_ID }}
-      run: |
-        if [ "${{ job.status }}" = "success" ]; then
-          TITLE="✅ Freemchost 自动续期成功！"
-        else
-          TITLE="❌ Freemchost 自动续期失败！"
-        fi
-        
-        # 提取日志摘要
-        INFO_SUMMARY=$(grep -E "服务器名称|当前状态|新到期时间" renew.log | sed 's/"//g')
-        [ -z "$INFO_SUMMARY" ] && INFO_SUMMARY="请查看 Action 日志获取详细错误"
-        
-        MSG_TEXT="${TITLE}%0A%0A📊 状态摘要:%0A${INFO_SUMMARY}"
-        
-        curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-          -d "chat_id=${TG_ID}" \
-          -d "text=$(echo -e $MSG_TEXT)"
+        pip install requests PySOCKS
+        python3 scripts/freemchost.py | tee renew.log
