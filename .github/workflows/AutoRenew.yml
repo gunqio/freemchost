@@ -10,26 +10,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. 使用 PAT 权限拉取私有仓库代码
-    - name: Checkout private repository
+    # 1. 拉取代码 (如果是当前仓库，repository参数可删除)
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
+        # 如果是拉取当前仓库，可以删掉下面这行；如果是拉取另一个私库，请保持并确保仓库名正确
+        repository: gunqio/zhiyong
         token: ${{ secrets.GH_PAT }}
 
-    # 2. 环境准备与 Xray 代理启动
+    # 2. 环境准备：下载 Xray 并启动
     - name: Setup Environment
       run: |
         python -m pip install --upgrade pip
         pip install requests
-        # 下载 Xray 核心
         curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip
         unzip xray.zip xray
-        # 写入 VMess 配置并启动
         echo '${{ secrets.VMESS_JSON }}' > config.json
         ./xray -c config.json &
         sleep 5
 
-    # 3. 运行根目录下的脚本
+    # 3. 运行脚本 (通过 pwd 和 ls 确保执行路径无误)
     - name: Run freemchost.py
       env:
         MY_EMAIL: ${{ secrets.MY_EMAIL }}
@@ -39,9 +39,12 @@ jobs:
         https_proxy: socks5://127.0.0.1:1080
         http_proxy: socks5://127.0.0.1:1080
       run: |
-        # 进入工作区根目录执行
-        cd $GITHUB_WORKSPACE
-        python freemchost.py | tee renew.log
+        echo "当前所在目录:"
+        pwd
+        echo "当前目录文件列表:"
+        ls -F
+        # 确保在仓库根目录执行，如果文件在子目录下，请修改此路径，如 python subfolder/freemchost.py
+        python3 freemchost.py | tee renew.log
 
     # 4. Telegram 通知 (失败时自动提醒)
     - name: Send Telegram Notification
@@ -56,9 +59,9 @@ jobs:
           TITLE="❌ Freemchost 自动续期失败！"
         fi
         
-        # 提取运行日志摘要
+        # 提取日志摘要
         INFO_SUMMARY=$(grep -E "服务器名称|当前状态|新到期时间" renew.log | sed 's/"//g')
-        if [ -z "$INFO_SUMMARY" ]; then INFO_SUMMARY="请查看 Action 日志获取详细错误"; fi
+        [ -z "$INFO_SUMMARY" ] && INFO_SUMMARY="请查看 Action 日志获取详细错误"
         
         MSG_TEXT="${TITLE}%0A%0A📊 状态摘要:%0A${INFO_SUMMARY}"
         
